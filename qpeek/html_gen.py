@@ -210,6 +210,7 @@ function tryClose() {{
     }}, 300);
 }}
 
+fetch('/qpeek/heartbeat');
 setInterval(function() {{ fetch('/qpeek/heartbeat'); }}, 3000);
 
 var inp = document.getElementById('response');
