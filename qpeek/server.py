@@ -45,6 +45,8 @@ class QpeekState:
         self.exit_code = 0
         self.shutdown_event = threading.Event()
         self.last_activity = time.monotonic()
+        self.last_heartbeat = time.monotonic()
+        self.heartbeat_started = False
 
     def current_files(self):
         """Return the file list for the current batch step."""
@@ -114,6 +116,8 @@ class QpeekHandler(BaseHTTPRequestHandler):
             self._serve_file(state)
         elif self.path == "/qpeek/meta":
             self._serve_meta(state)
+        elif self.path == "/qpeek/heartbeat":
+            self._handle_heartbeat(state)
         else:
             self.send_error(404)
 
@@ -199,6 +203,21 @@ class QpeekHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _handle_heartbeat(self, state):
+        state.last_heartbeat = time.monotonic()
+        state.heartbeat_started = True
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_request(self, code="-", size="-"):
+        # Suppress heartbeat logging to keep stderr clean
+        if self.path == "/qpeek/heartbeat":
+            return
+        super().log_request(code, size)
+
     def _handle_close(self, state):
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
@@ -232,15 +251,26 @@ class QpeekHandler(BaseHTTPRequestHandler):
 
 
 def _timeout_watcher(state):
-    """Background thread that checks for inactivity timeout."""
+    """Background thread that checks for inactivity timeout and heartbeat loss."""
+    HEARTBEAT_TIMEOUT = 10  # seconds without heartbeat = abandoned
     while not state.shutdown_event.is_set():
+        now = time.monotonic()
+        # Check inactivity timeout
         if state.timeout > 0:
-            elapsed = time.monotonic() - state.last_activity
+            elapsed = now - state.last_activity
             if elapsed >= state.timeout:
                 state.exit_code = 3
                 state.shutdown_event.set()
                 return
-        state.shutdown_event.wait(timeout=5)
+        # Check heartbeat (only after browser has started sending them)
+        if state.heartbeat_started:
+            since_heartbeat = now - state.last_heartbeat
+            if since_heartbeat >= HEARTBEAT_TIMEOUT:
+                state.abandoned = True
+                state.exit_code = 1
+                state.shutdown_event.set()
+                return
+        state.shutdown_event.wait(timeout=2)
 
 
 def _get_tailscale_ip():
@@ -277,10 +307,9 @@ def run_server(files, port, ask, choices, batch, group, custom_html, timeout):
     except ValueError:
         pass  # not main thread (e.g., during testing)
 
-    # Start timeout watcher
-    if timeout > 0:
-        watcher = threading.Thread(target=_timeout_watcher, args=(state,), daemon=True)
-        watcher.start()
+    # Start timeout/heartbeat watcher
+    watcher = threading.Thread(target=_timeout_watcher, args=(state,), daemon=True)
+    watcher.start()
 
     # Serve in a thread so we can wait on the shutdown event
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -294,21 +323,19 @@ def run_server(files, port, ask, choices, batch, group, custom_html, timeout):
 
     server.shutdown()
 
-    # Print results to stdout
-    if ask is not None:
-        if batch:
-            print(json.dumps(state.results, indent=None))
-        elif state.results:
-            print(json.dumps(state.results[0], indent=None))
-
     # Determine exit code
     if state.exit_code == 3:
-        return 3
-    if state.completed:
-        return 0
-    # Abandoned: print partial results for batch
-    if batch and ask is not None and state.results:
-        # Already printed above in the completed path, but if we got here
-        # results were already printed. Set exit code.
-        pass
-    return 1 if state.abandoned else 0
+        exit_code = 3
+    elif state.completed:
+        exit_code = 0
+    else:
+        exit_code = 1
+
+    # Print results to stdout (complete or partial)
+    if ask is not None and state.results:
+        if batch:
+            print(json.dumps(state.results, indent=None))
+        else:
+            print(json.dumps(state.results[0], indent=None))
+
+    return exit_code

@@ -351,3 +351,40 @@ class TestCustomHTML:
             time.sleep(0.3)
 
         assert srv.exit_code == 0
+
+
+class TestAbandoned:
+    def test_heartbeat_loss_exits_with_code_1(self, png_file):
+        """Browser sends heartbeats then stops. Server detects abandonment."""
+        with ServerRunner(port=2045, files=[png_file], ask="Question?",
+                          choices=["A", "B"], batch=False, group=1,
+                          custom_html=None, timeout=30) as srv:
+            srv.get("/")
+            srv.get("/qpeek/heartbeat")
+            time.sleep(0.3)
+            srv.get("/qpeek/heartbeat")
+            # Stop sending heartbeats; wait for detection (~10s)
+            time.sleep(12)
+
+        assert srv.exit_code == 1
+
+    def test_batch_partial_results_on_abandon(self, png_files):
+        """Abandon partway through batch; partial results printed."""
+        with ServerRunner(port=2046, files=png_files[:2], ask="Rate",
+                          choices=["Good", "Bad"], batch=True, group=1,
+                          custom_html=None, timeout=30) as srv:
+            # Complete first item
+            srv.get("/")
+            srv.get("/qpeek/heartbeat")
+            srv.post("/qpeek/submit", {"choice": "Good"})
+            time.sleep(0.3)
+            # Load second item, send one heartbeat, then abandon
+            srv.get("/")
+            srv.get("/qpeek/heartbeat")
+            time.sleep(12)
+
+        assert srv.exit_code == 1
+        results = json.loads(srv.stdout.strip())
+        assert isinstance(results, list)
+        assert len(results) == 1
+        assert results[0]["choice"] == "Good"

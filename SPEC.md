@@ -220,8 +220,8 @@ qpeek processes if the reviewer walks away. Override with `--timeout` (0 to disa
 - [x] `--port 8080` binds to the specified port.
 - [x] Timeout (default 300s) shuts down server, exit code 3.
 - [x] Ctrl-C shuts down server cleanly, exit code 1.
-- [ ] Abandoned session (browser closes without submit in survey mode) exits with code 1.
-- [ ] Batch mode partial completion prints partial results as JSON array, exits with code 1.
+- [x] Abandoned session (browser closes without submit in survey mode) exits with code 1.
+- [x] Batch mode partial completion prints partial results as JSON array, exits with code 1.
 - [x] No external Python dependencies (stdlib only).
 - [x] Installs via pip into a venv.
 - [x] Binds to 0.0.0.0, reachable from Tailscale peers.
