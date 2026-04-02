@@ -205,6 +205,17 @@ result=$(qpeek --ask "Review" --html /tmp/review.html output1.png output2.png)
 
 Metadata about the current session (question, choices, file list) is available at `/qpeek/meta` for custom pages that want to stay generic.
 
+### Invocation from agent tooling
+
+qpeek blocks until the browser session ends. Agent frameworks that capture subprocess output in buffered or background mode will not see the URL until the process exits, which may be never.
+
+Launch qpeek in a shell background and read the URL from the first line of stderr:
+
+```bash
+qpeek photo.png &
+# stderr prints:  qpeek ready:  http://100.70.19.124:2020
+```
+
 ## Networking
 
 qpeek binds to `0.0.0.0` so it is reachable from any network interface. It is designed for use over a Tailscale mesh or similar private network where the headless server and the reviewer's browser are on the same trusted network. There is no authentication or encryption; do not expose qpeek to untrusted networks.
