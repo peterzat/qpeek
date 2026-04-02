@@ -65,9 +65,9 @@ qpeek --ask "Compare these two. Which is better?" a.png b.png
 ```
 
 - Question text displayed prominently above the file(s).
-- Text input field (multi-line textarea) below the files.
-- **Submit** button. On click: POST response to `/qpeek/submit`, server prints
-  JSON to stdout, shuts down, browser closes.
+- Single-line text input below the files. Pressing Enter submits.
+- **Submit** button also available. On click or Enter: POST response to
+  `/qpeek/submit`, server prints JSON to stdout, shuts down, browser closes.
 - Stdout (single item): `{"file": "cat.png", "response": "yes, great cat pic!"}`
 - Stdout (multiple files shown together): `{"files": ["a.png", "b.png"], "response": "image 1 is better"}`
 - Exit code 0 on submit. Exit code 1 if browser closed without submitting.
@@ -170,7 +170,7 @@ qpeek --html custom_review.html cat.png dog.png
 - Buttons: large (min 44px touch target), high contrast, clear labels.
 - Filename labels below each file in muted text.
 - Survey question: large, prominent text above the content area.
-- Text input: full-width textarea, reasonable default height (~3 lines).
+- Text input: full-width single-line input, Enter submits.
 - Progress indicator (batch mode): top-right, subtle, e.g., "2 / 5".
 
 ## CLI Interface
@@ -206,22 +206,24 @@ qpeek processes if the reviewer walks away. Override with `--timeout` (0 to disa
 
 ## Acceptance Criteria
 
-- [ ] `qpeek cat.png` starts server on 0.0.0.0:2020, serves page with image, Close button works, server exits with code 0.
-- [ ] `qpeek cat.png dog.png` displays both images with filenames labeled.
-- [ ] `qpeek --ask "question" cat.png` shows question, textarea, Submit button; prints JSON to stdout on submit.
-- [ ] `qpeek --ask "question" --choices "A,B,C" cat.png` shows buttons instead of textarea; prints JSON with `"choice"` key.
-- [ ] `qpeek --batch img1.png img2.png img3.png` shows one image at a time with Next/Done, no stdout output.
-- [ ] `qpeek --batch --ask "rate" --choices "Good,Bad" img1.png img2.png` collects one choice per image, prints JSON array.
-- [ ] `qpeek --batch --group 2 --ask "which?" --choices "Left,Right" a.png b.png c.png d.png` groups files in pairs.
-- [ ] `--html custom.html` serves the provided HTML, shutdown hooks work.
-- [ ] Supported file types render correctly: images (png/jpg/gif/svg/webp/bmp/tiff), PDF, markdown (rendered), text/log/csv/json/yaml.
-- [ ] Unsupported file type prints error and exits with code 2.
-- [ ] Missing file prints error and exits with code 2.
-- [ ] `--port 8080` binds to the specified port.
-- [ ] Timeout (default 300s) shuts down server, exit code 3.
-- [ ] Ctrl-C shuts down server cleanly, exit code 1.
+- [x] `qpeek cat.png` starts server on 0.0.0.0:2020, serves page with image, Close button works, server exits with code 0.
+- [x] `qpeek cat.png dog.png` displays both images with filenames labeled.
+- [x] `qpeek --ask "question" cat.png` shows question, text input (Enter submits), Submit button; prints JSON to stdout on submit.
+- [x] `qpeek --ask "question" --choices "A,B,C" cat.png` shows buttons instead of textarea; prints JSON with `"choice"` key.
+- [x] `qpeek --batch img1.png img2.png img3.png` shows one image at a time with Next/Done, no stdout output.
+- [x] `qpeek --batch --ask "rate" --choices "Good,Bad" img1.png img2.png` collects one choice per image, prints JSON array.
+- [x] `qpeek --batch --group 2 --ask "which?" --choices "Left,Right" a.png b.png c.png d.png` groups files in pairs.
+- [x] `--html custom.html` serves the provided HTML, shutdown hooks work.
+- [x] Supported file types render correctly: images (png/jpg/gif/svg/webp/bmp/tiff), PDF, markdown (rendered), text/log/csv/json/yaml.
+- [x] Unsupported file type prints error and exits with code 2.
+- [x] Missing file prints error and exits with code 2.
+- [x] `--port 8080` binds to the specified port.
+- [x] Timeout (default 300s) shuts down server, exit code 3.
+- [x] Ctrl-C shuts down server cleanly, exit code 1.
 - [ ] Abandoned session (browser closes without submit in survey mode) exits with code 1.
 - [ ] Batch mode partial completion prints partial results as JSON array, exits with code 1.
-- [ ] No external Python dependencies (stdlib only).
-- [ ] Installs via pip into a venv.
-- [ ] Binds to 0.0.0.0, reachable from Tailscale peers.
+- [x] No external Python dependencies (stdlib only).
+- [x] Installs via pip into a venv.
+- [x] Binds to 0.0.0.0, reachable from Tailscale peers.
+
+<!-- SPEC_META: {"date":"2026-04-02","title":"qpeek - Quick Peek File Viewer","criteria_total":19,"criteria_met":16} -->
