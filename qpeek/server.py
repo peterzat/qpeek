@@ -263,7 +263,8 @@ def _timeout_watcher(state):
                 state.shutdown_event.set()
                 return
         # Check heartbeat (only after browser has started sending them)
-        if state.heartbeat_started:
+        # --timeout 0 disables both inactivity and heartbeat abandonment
+        if state.heartbeat_started and state.timeout != 0:
             since_heartbeat = now - state.last_heartbeat
             if since_heartbeat >= HEARTBEAT_TIMEOUT:
                 state.abandoned = True
@@ -317,7 +318,7 @@ def run_server(files, port, ask, choices, batch, group, custom_html, timeout):
 
     ip = _get_tailscale_ip()
     url = f"http://{ip}:{port}"
-    print(f"\n  qpeek ready:  {url}\n", file=sys.stderr)
+    print(f"\n  qpeek ready:  {url}\n", file=sys.stderr, flush=True)
 
     state.shutdown_event.wait()
 
@@ -332,7 +333,7 @@ def run_server(files, port, ask, choices, batch, group, custom_html, timeout):
         exit_code = 1
 
     # Print results to stdout (complete or partial)
-    if ask is not None and state.results:
+    if state.results:
         if batch:
             print(json.dumps(state.results, indent=None))
         else:
