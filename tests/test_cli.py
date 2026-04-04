@@ -3,7 +3,7 @@ import os
 import tempfile
 import pytest
 
-from qpeek.cli import parse_args, validate_args, file_type, SUPPORTED_EXTENSIONS
+from qpeek.cli import parse_args, validate_args, file_type, is_serve_mode, SUPPORTED_EXTENSIONS
 
 
 class TestFileType:
@@ -143,3 +143,70 @@ class TestValidateArgs:
         finally:
             for p in paths:
                 os.unlink(p)
+
+
+class TestServeMode:
+    def test_directory_triggers_serve_mode(self, tmp_path):
+        args = parse_args([str(tmp_path)])
+        assert is_serve_mode(args) is True
+
+    def test_html_files_trigger_serve_mode(self):
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as f:
+            f.write(b"<html></html>")
+            path = f.name
+        try:
+            args = parse_args([path])
+            assert is_serve_mode(args) is True
+        finally:
+            os.unlink(path)
+
+    def test_html_with_ask_no_serve_mode(self):
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as f:
+            f.write(b"<html></html>")
+            path = f.name
+        try:
+            args = parse_args(["--ask", "question", path])
+            assert is_serve_mode(args) is False
+        finally:
+            os.unlink(path)
+
+    def test_html_with_batch_no_serve_mode(self):
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as f:
+            f.write(b"<html></html>")
+            path = f.name
+        try:
+            args = parse_args(["--batch", path])
+            assert is_serve_mode(args) is False
+        finally:
+            os.unlink(path)
+
+    def test_non_html_files_no_serve_mode(self):
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            path = f.name
+        try:
+            args = parse_args([path])
+            assert is_serve_mode(args) is False
+        finally:
+            os.unlink(path)
+
+    def test_mixed_html_and_non_html_no_serve_mode(self):
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as h:
+            h.write(b"<html></html>")
+            html_path = h.name
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as p:
+            png_path = p.name
+        try:
+            args = parse_args([html_path, png_path])
+            assert is_serve_mode(args) is False
+        finally:
+            os.unlink(html_path)
+            os.unlink(png_path)
+
+    def test_directory_validates(self, tmp_path):
+        args = parse_args([str(tmp_path)])
+        assert validate_args(args) is None
+
+    def test_directory_rejects_ask(self, tmp_path):
+        args = parse_args(["--ask", "q", str(tmp_path)])
+        err = validate_args(args)
+        assert err is not None

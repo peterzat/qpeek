@@ -7,10 +7,11 @@ import threading
 import time
 import zlib
 from urllib.request import urlopen, Request
+from urllib.error import HTTPError
 
 import pytest
 
-from qpeek.server import run_server
+from qpeek.server import run_server, run_serve_mode
 
 
 def _make_png(path):
@@ -388,3 +389,171 @@ class TestAbandoned:
         assert isinstance(results, list)
         assert len(results) == 1
         assert results[0]["choice"] == "Good"
+
+
+class ServeRunner:
+    """Context manager to run serve mode in a background thread."""
+
+    def __init__(self, port, paths, timeout=10):
+        self.port = port
+        self.paths = paths
+        self.timeout = timeout
+        self.exit_code = None
+        self._thread = None
+
+    def __enter__(self):
+        def run():
+            self.exit_code = run_serve_mode(
+                paths=self.paths, port=self.port, timeout=self.timeout
+            )
+
+        self._thread = threading.Thread(target=run, daemon=True)
+        self._thread.start()
+        time.sleep(0.4)
+        return self
+
+    def __exit__(self, *args):
+        if self._thread:
+            self._thread.join(timeout=3)
+
+    def get(self, path):
+        return urlopen(f"http://127.0.0.1:{self.port}{path}")
+
+    def post(self, path):
+        req = Request(f"http://127.0.0.1:{self.port}{path}", data=b"", method="POST")
+        return urlopen(req)
+
+
+class TestServeMode:
+    def test_serve_directory_with_index(self, tmp_path):
+        (tmp_path / "index.html").write_text("<html><body>INDEX</body></html>")
+        (tmp_path / "style.css").write_text("body { color: red; }")
+
+        with ServeRunner(port=2050, paths=[str(tmp_path)]) as srv:
+            resp = srv.get("/")
+            html = resp.read().decode()
+            assert "INDEX" in html
+            assert "qpeek-close" in html  # close button injected
+
+            resp = srv.get("/style.css")
+            css = resp.read().decode()
+            assert "color: red" in css
+            assert "qpeek-close" not in css  # not injected into non-HTML
+
+            srv.post("/qpeek/close")
+            time.sleep(0.3)
+
+        assert srv.exit_code == 0
+
+    def test_serve_directory_listing(self, tmp_path):
+        (tmp_path / "file1.txt").write_text("hello")
+        (tmp_path / "file2.html").write_text("<html></html>")
+        sub = tmp_path / "subdir"
+        sub.mkdir()
+        (sub / "nested.txt").write_text("nested")
+
+        with ServeRunner(port=2051, paths=[str(tmp_path)]) as srv:
+            resp = srv.get("/")
+            html = resp.read().decode()
+            assert "file1.txt" in html
+            assert "file2.html" in html
+            assert "subdir/" in html
+            assert "qpeek-close" in html  # close button in listing
+
+            # Can fetch files
+            resp = srv.get("/file1.txt")
+            assert resp.read().decode() == "hello"
+
+            # Can navigate subdirectory
+            resp = srv.get("/subdir/")
+            html = resp.read().decode()
+            assert "nested.txt" in html
+
+            resp = srv.get("/subdir/nested.txt")
+            assert resp.read().decode() == "nested"
+
+            srv.post("/qpeek/close")
+            time.sleep(0.3)
+
+        assert srv.exit_code == 0
+
+    def test_serve_html_file(self, tmp_path):
+        html_file = tmp_path / "page.html"
+        html_file.write_text('<html><body><img src="cat.jpg"></body></html>')
+        _make_png(str(tmp_path / "cat.jpg"))
+
+        with ServeRunner(port=2052, paths=[str(html_file)]) as srv:
+            resp = srv.get("/page.html")
+            html = resp.read().decode()
+            assert "cat.jpg" in html
+            assert "qpeek-close" in html  # close button injected
+
+            # Sibling file is accessible (relative path works)
+            resp = srv.get("/cat.jpg")
+            data = resp.read()
+            assert len(data) > 0
+
+            srv.post("/qpeek/close")
+            time.sleep(0.3)
+
+        assert srv.exit_code == 0
+
+    def test_serve_close_shuts_down(self, tmp_path):
+        (tmp_path / "index.html").write_text("<html><body>HI</body></html>")
+
+        with ServeRunner(port=2057, paths=[str(tmp_path)]) as srv:
+            srv.get("/")
+            srv.post("/qpeek/close")
+            time.sleep(0.3)
+
+        assert srv.exit_code == 0
+
+    def test_serve_rejects_path_traversal(self, tmp_path):
+        (tmp_path / "index.html").write_text("<html></html>")
+
+        with ServeRunner(port=2053, paths=[str(tmp_path)]) as srv:
+            try:
+                srv.get("/../../../etc/passwd")
+                assert False, "should have raised"
+            except HTTPError as e:
+                assert e.code in (403, 404)
+
+            srv.post("/qpeek/close")
+            time.sleep(0.3)
+
+    def test_serve_404_for_missing_file(self, tmp_path):
+        (tmp_path / "index.html").write_text("<html></html>")
+
+        with ServeRunner(port=2054, paths=[str(tmp_path)]) as srv:
+            try:
+                srv.get("/nonexistent.txt")
+                assert False, "should have raised"
+            except HTTPError as e:
+                assert e.code == 404
+
+            srv.post("/qpeek/close")
+            time.sleep(0.3)
+
+    def test_serve_timeout(self, tmp_path):
+        (tmp_path / "index.html").write_text("<html></html>")
+
+        with ServeRunner(port=2055, paths=[str(tmp_path)], timeout=1) as srv:
+            time.sleep(2)
+
+        assert srv.exit_code == 3
+
+    def test_serve_subdirectory_index_html(self, tmp_path):
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "index.html").write_text("<html><body>SUB INDEX</body></html>")
+
+        with ServeRunner(port=2056, paths=[str(tmp_path)]) as srv:
+            resp = srv.get("/sub/")
+            html = resp.read().decode()
+            assert "SUB INDEX" in html
+            assert "qpeek-close" in html
+
+            srv.post("/qpeek/close")
+            time.sleep(0.3)
+
+        assert srv.exit_code == 0

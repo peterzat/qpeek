@@ -46,7 +46,7 @@ def parse_args(argv=None):
         prog="qpeek",
         description="Quick Peek - transient file viewer over HTTP",
     )
-    parser.add_argument("files", nargs="+", metavar="FILE", help="File(s) to serve")
+    parser.add_argument("files", nargs="+", metavar="FILE", help="File(s) or directory to serve")
     parser.add_argument("--port", type=int, default=2020, help="Port to bind (default: 2020)")
     parser.add_argument("--ask", metavar="QUESTION", help="Survey question to display")
     parser.add_argument("--choices", metavar="LIST", help="Comma-separated choices (requires --ask)")
@@ -58,6 +58,26 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+def is_serve_mode(args):
+    """Detect whether args trigger serve mode (static file server).
+
+    Serve mode activates when:
+    - A single directory is passed as the argument, OR
+    - All files are HTML and no --ask/--batch flags are set.
+    """
+    if len(args.files) == 1 and os.path.isdir(args.files[0]):
+        return True
+    if args.ask or args.batch:
+        return False
+    return all(
+        os.path.splitext(f)[1].lower() in HTML_EXTENSIONS
+        for f in args.files
+        if os.path.isfile(f)
+    ) and all(
+        os.path.isfile(f) for f in args.files
+    )
+
+
 def validate_args(args):
     """Validate arguments, return error message or None."""
     if args.choices and not args.ask:
@@ -67,6 +87,18 @@ def validate_args(args):
     if args.batch and args.group > 1:
         if len(args.files) % args.group != 0:
             return f"number of files ({len(args.files)}) not divisible by --group {args.group}"
+
+    # Check for serve mode (directory or HTML-only files)
+    if is_serve_mode(args):
+        if len(args.files) == 1 and os.path.isdir(args.files[0]):
+            if args.ask or args.batch or args.html:
+                return "--ask, --batch, and --html are not supported with directory serving"
+            return None
+        # HTML-only serve mode: validate files exist
+        for f in args.files:
+            if not os.path.isfile(f):
+                return f"file not found: {f}"
+        return None
 
     # Validate files exist and have supported types
     all_files = list(args.files)
@@ -91,25 +123,36 @@ def main(argv=None):
         print(f"qpeek: {error}", file=sys.stderr)
         sys.exit(2)
 
-    # Parse choices into a list
-    choices = None
-    if args.choices:
-        choices = [c.strip() for c in args.choices.split(",") if c.strip()]
+    serve_mode = is_serve_mode(args)
 
-    # Resolve file paths to absolute
-    args.files = [os.path.abspath(f) for f in args.files]
-    if args.html:
-        args.html = os.path.abspath(args.html)
+    if serve_mode:
+        args.files = [os.path.abspath(f) for f in args.files]
+        from qpeek.server import run_serve_mode
+        exit_code = run_serve_mode(
+            paths=args.files,
+            port=args.port,
+            timeout=args.timeout,
+        )
+    else:
+        # Parse choices into a list
+        choices = None
+        if args.choices:
+            choices = [c.strip() for c in args.choices.split(",") if c.strip()]
 
-    from qpeek.server import run_server
-    exit_code = run_server(
-        files=args.files,
-        port=args.port,
-        ask=args.ask,
-        choices=choices,
-        batch=args.batch,
-        group=args.group,
-        custom_html=args.html,
-        timeout=args.timeout,
-    )
+        # Resolve file paths to absolute
+        args.files = [os.path.abspath(f) for f in args.files]
+        if args.html:
+            args.html = os.path.abspath(args.html)
+
+        from qpeek.server import run_server
+        exit_code = run_server(
+            files=args.files,
+            port=args.port,
+            ask=args.ask,
+            choices=choices,
+            batch=args.batch,
+            group=args.group,
+            custom_html=args.html,
+            timeout=args.timeout,
+        )
     sys.exit(exit_code)

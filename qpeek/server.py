@@ -340,3 +340,217 @@ def run_server(files, port, ask, choices, batch, group, custom_html, timeout):
             print(json.dumps(state.results[0], indent=None))
 
     return exit_code
+
+
+# --- Serve mode: static file server for HTML files and directories ---
+
+class ServeState:
+    """Shared state for serve mode."""
+
+    def __init__(self, doc_root, index_file, timeout):
+        self.doc_root = doc_root
+        self.index_file = index_file  # absolute path, or None for directory listing
+        self.timeout = timeout
+        self.exit_code = 0
+        self.shutdown_event = threading.Event()
+        self.last_activity = time.monotonic()
+
+    def touch(self):
+        self.last_activity = time.monotonic()
+
+
+def _serve_timeout_watcher(state):
+    """Background thread for serve mode inactivity timeout."""
+    while not state.shutdown_event.is_set():
+        if state.timeout > 0:
+            elapsed = time.monotonic() - state.last_activity
+            if elapsed >= state.timeout:
+                state.exit_code = 3
+                state.shutdown_event.set()
+                return
+        state.shutdown_event.wait(timeout=2)
+
+
+def _directory_listing_html(dir_path, url_path):
+    """Generate a simple directory listing page."""
+    import html as h
+    entries = sorted(os.listdir(dir_path))
+    dirs = []
+    files = []
+    for name in entries:
+        full = os.path.join(dir_path, name)
+        if os.path.isdir(full):
+            dirs.append(name)
+        elif os.path.isfile(full):
+            files.append(name)
+
+    # Build relative URL prefix
+    if url_path.endswith("/"):
+        prefix = url_path
+    else:
+        prefix = url_path + "/"
+
+    lines = []
+    # Parent link (if not root)
+    if url_path not in ("", "/"):
+        parent = "/".join(url_path.rstrip("/").split("/")[:-1]) or "/"
+        lines.append(f'<li><a href="{h.escape(parent)}">../</a></li>')
+    for d in dirs:
+        href = prefix + d + "/"
+        lines.append(f'<li><a href="{h.escape(href)}">{h.escape(d)}/</a></li>')
+    for f in files:
+        href = prefix + f
+        lines.append(f'<li><a href="{h.escape(href)}">{h.escape(f)}</a></li>')
+
+    title = h.escape(url_path or "/")
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Index of {title}</title>
+<style>
+body {{ background: #1a1a2e; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont,
+"Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 24px; padding-bottom: 80px; }}
+h1 {{ font-size: 20px; margin-bottom: 16px; }}
+ul {{ list-style: none; padding: 0; }}
+li {{ padding: 4px 0; }}
+a {{ color: #7ec8e3; text-decoration: none; }}
+a:hover {{ text-decoration: underline; }}
+</style></head>
+<body><h1>Index of {title}</h1><ul>{"".join(lines)}</ul>
+{_CLOSE_BUTTON_HTML}</body></html>"""
+
+
+_CLOSE_BUTTON_HTML = """<div id="qpeek-close" style="position:fixed;bottom:16px;right:16px;z-index:999999;">
+<button onclick="fetch('/qpeek/close',{method:'POST'}).then(function(){try{window.close();}catch(e){}document.body.innerHTML='<p style=\\'text-align:center;margin-top:40vh;font:18px sans-serif;color:#888\\'>You may close this tab.</p>';})" style="background:#e94560;color:#fff;border:none;border-radius:6px;padding:10px 24px;font-size:15px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);min-width:44px;min-height:44px;">Close</button>
+</div>"""
+
+
+class ServeHandler(BaseHTTPRequestHandler):
+    """HTTP handler for serve mode: static file server."""
+
+    def log_message(self, format, *args):
+        print(f"qpeek: {format % args}", file=sys.stderr)
+
+    def _resolve_path(self):
+        """Parse and validate the request path. Return fs_path or None (error already sent)."""
+        from urllib.parse import unquote
+        state = self.server.serve_state
+        path = unquote(self.path.split("?")[0].split("#")[0])
+
+        parts = [p for p in path.split("/") if p and p != "."]
+        if any(p == ".." for p in parts):
+            self.send_error(403)
+            return None, None
+
+        fs_path = os.path.realpath(os.path.join(state.doc_root, *parts))
+
+        if not fs_path.startswith(os.path.realpath(state.doc_root)):
+            self.send_error(403)
+            return None, None
+
+        if path in ("", "/") and state.index_file:
+            fs_path = state.index_file
+
+        return fs_path, path
+
+    def do_GET(self):
+        state = self.server.serve_state
+        state.touch()
+
+        fs_path, url_path = self._resolve_path()
+        if fs_path is None:
+            return
+
+        if os.path.isdir(fs_path):
+            index = os.path.join(fs_path, "index.html")
+            if os.path.isfile(index):
+                self._serve_static(index, inject_close=True)
+            else:
+                content = _directory_listing_html(fs_path, url_path).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+        elif os.path.isfile(fs_path):
+            mime, _ = mimetypes.guess_type(fs_path)
+            inject = mime is not None and mime.startswith("text/html")
+            self._serve_static(fs_path, inject_close=inject)
+        else:
+            self.send_error(404)
+
+    def do_POST(self):
+        state = self.server.serve_state
+        state.touch()
+
+        if self.path == "/qpeek/close":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"ok")
+            state.exit_code = 0
+            state.shutdown_event.set()
+        else:
+            self.send_error(404)
+
+    def _serve_static(self, fs_path, inject_close=False):
+        mime, _ = mimetypes.guess_type(fs_path)
+        if mime is None:
+            mime = "application/octet-stream"
+        with open(fs_path, "rb") as f:
+            data = f.read()
+        if inject_close:
+            snippet = _CLOSE_BUTTON_HTML.encode("utf-8")
+            # Insert before </body> if present, otherwise append
+            lower = data.lower()
+            idx = lower.rfind(b"</body>")
+            if idx != -1:
+                data = data[:idx] + snippet + data[idx:]
+            else:
+                data = data + snippet
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def run_serve_mode(paths, port, timeout):
+    """Start a static file server for serve mode. Return exit code."""
+    # Determine doc_root and index_file
+    if len(paths) == 1 and os.path.isdir(paths[0]):
+        doc_root = paths[0]
+        index_path = os.path.join(doc_root, "index.html")
+        index_file = index_path if os.path.isfile(index_path) else None
+    else:
+        # HTML file(s): root is the parent directory of the first file
+        doc_root = os.path.dirname(paths[0])
+        index_file = paths[0]
+
+    state = ServeState(doc_root, index_file, timeout)
+
+    server = ThreadingHTTPServer(("0.0.0.0", port), ServeHandler)
+    server.serve_state = state
+
+    def sigint_handler(sig, frame):
+        state.exit_code = 1
+        state.shutdown_event.set()
+
+    try:
+        signal.signal(signal.SIGINT, sigint_handler)
+    except ValueError:
+        pass
+
+    watcher = threading.Thread(target=_serve_timeout_watcher, args=(state,), daemon=True)
+    watcher.start()
+
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+
+    ip = _get_tailscale_ip()
+    url = f"http://{ip}:{port}"
+    if index_file and len(paths) == 1 and not os.path.isdir(paths[0]):
+        url += f"/{os.path.basename(index_file)}"
+    print(f"\n  qpeek serving:  {url}\n", file=sys.stderr, flush=True)
+
+    state.shutdown_event.wait()
+    server.shutdown()
+    return state.exit_code
