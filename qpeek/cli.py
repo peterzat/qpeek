@@ -67,15 +67,16 @@ def is_serve_mode(args):
     """
     if len(args.files) == 1 and os.path.isdir(args.files[0]):
         return True
-    if args.ask or args.batch:
+    if args.ask or args.batch or args.html:
         return False
-    return all(
-        os.path.splitext(f)[1].lower() in HTML_EXTENSIONS
-        for f in args.files
-        if os.path.isfile(f)
-    ) and all(
-        os.path.isfile(f) for f in args.files
-    )
+    if not all(os.path.isfile(f) for f in args.files):
+        return False
+    if not all(os.path.splitext(f)[1].lower() in HTML_EXTENSIONS for f in args.files):
+        return False
+    # All HTML files must share the same parent directory so they can be
+    # served from a single doc_root.
+    parents = {os.path.dirname(os.path.abspath(f)) for f in args.files}
+    return len(parents) == 1
 
 
 def validate_args(args):
