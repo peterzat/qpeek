@@ -256,4 +256,45 @@ qpeek processes if the reviewer walks away. Override with `--timeout` (0 to disa
 - [x] Installs via pip into a venv.
 - [x] Binds to 0.0.0.0, reachable from Tailscale peers.
 
-<!-- SPEC_META: {"date":"2026-04-04","title":"qpeek - Quick Peek File Viewer","criteria_total":22,"criteria_met":19} -->
+### Proposal (2026-04-04)
+
+**What happened:** qpeek is feature-complete relative to the README spec. All modes work
+(view, survey chat, survey buttons, batch, batch with groups, custom HTML, serve mode for
+directories and HTML files). The implementation is 4 source files totaling ~800 lines with
+74 passing tests across CLI validation, markdown rendering, and server integration. Key
+evolution during the build:
+
+- Heartbeat-based abandon detection replaced the original close-detection approach after
+  real-world usage showed that browser tab closes were not reliably caught by other means.
+- Serve mode was the final feature added, with a code review catching two bugs: `--html`
+  flag being ignored when the positional arg was HTML, and multi-directory HTML files being
+  silently accepted but failing to serve.
+- The agent tooling integration section in the README addresses a practical issue discovered
+  during testing: agent frameworks that buffer subprocess output never see the URL because
+  qpeek blocks.
+
+**Questions and directions:**
+
+1. **Robustness for real-world agent loops.** qpeek is untested in actual agentic workflows
+   end-to-end. Running it from a Claude Code tool invocation or a shell script that parses
+   stdout would surface integration friction (encoding, buffering, error handling when the
+   human never opens the URL). A focused integration test session would reveal what needs
+   hardening.
+
+2. **Multi-file batch items from the CLI.** Currently `--batch --group N` is the only way
+   to show multiple files per step. A separator syntax (e.g., `--batch a.png b.png -- c.png
+   d.png e.png`) would allow variable-length groups per step, which A/B-vs-original
+   comparisons need. This is a CLI design question, not just implementation.
+
+3. **Security surface.** qpeek serves arbitrary local files over HTTP with no authentication.
+   The README documents this as intentional (Tailscale-scoped), but a `/security` review has
+   not been run. Path traversal is blocked in serve mode, but the `/files/<name>` endpoint
+   in normal mode serves any file passed on the command line by basename, which is by design
+   but worth a security review to confirm there are no bypasses.
+
+4. **Markdown renderer completeness.** The stdlib-only markdown renderer handles headings,
+   lists, code blocks, links, bold/italic, and horizontal rules. It does not handle tables,
+   images, or nested blockquotes. Whether this matters depends on the actual markdown files
+   qpeek will display.
+
+<!-- SPEC_META: {"date":"2026-04-04","title":"qpeek - Quick Peek File Viewer","criteria_total":22,"criteria_met":22} -->
