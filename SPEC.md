@@ -130,6 +130,33 @@ qpeek --batch --group 2 --ask "Which is better?" --choices "Left,Right" \
   consumed in groups of N. Total files must be divisible by N (error otherwise).
 - Output uses `"files"` array instead of `"file"` string.
 
+### Serve Mode (automatic)
+
+Static file server for HTML files and directories. Activates automatically
+when all positional arguments are HTML files (without `--ask` or `--batch`),
+or when a single directory is passed.
+
+```
+qpeek report.html
+qpeek ./site/
+```
+
+- **HTML files**: the parent directory of the first file becomes the document
+  root. Relative references in the HTML (`<img src="./cat.jpg">`,
+  `<a href="page2.html">`) resolve correctly. All HTML files must share the
+  same parent directory.
+- **Directory**: the directory itself is the document root. If `index.html`
+  exists, it is served at `/`; otherwise a directory listing is shown.
+- Subdirectories are navigable. Each subdirectory with an `index.html`
+  auto-serves it; otherwise a listing is generated.
+- A floating **Close** button is injected into all HTML responses. Clicking
+  it POSTs to `/qpeek/close`, shutting down the server (exit code 0).
+  Non-HTML assets (images, CSS, JS) are served unmodified.
+- Path traversal is blocked (both `..` component rejection and `realpath`
+  prefix validation).
+- No stdout output. Shutdown via Close button, timeout, or Ctrl-C.
+- Not compatible with `--ask`, `--batch`, or `--html`.
+
 ### Custom HTML Mode (`--html`)
 
 Serve a user-provided HTML file instead of the generated page.
@@ -176,7 +203,7 @@ qpeek --html custom_review.html cat.png dog.png
 ## CLI Interface
 
 ```
-qpeek [OPTIONS] FILE [FILE ...]
+qpeek [OPTIONS] FILE|DIR [FILE ...]
 
 Options:
   --port PORT        Port to bind (default: 2020)
@@ -222,8 +249,11 @@ qpeek processes if the reviewer walks away. Override with `--timeout` (0 to disa
 - [x] Ctrl-C shuts down server cleanly, exit code 1.
 - [x] Abandoned session (browser closes without submit in survey mode) exits with code 1.
 - [x] Batch mode partial completion prints partial results as JSON array, exits with code 1.
+- [x] `qpeek ./site/` serves the directory with listing or index.html, Close button works, relative asset references resolve.
+- [x] `qpeek report.html` serves the HTML file directly with sibling files accessible via relative paths.
+- [x] Serve mode rejects path traversal attempts (`../`).
 - [x] No external Python dependencies (stdlib only).
 - [x] Installs via pip into a venv.
 - [x] Binds to 0.0.0.0, reachable from Tailscale peers.
 
-<!-- SPEC_META: {"date":"2026-04-02","title":"qpeek - Quick Peek File Viewer","criteria_total":19,"criteria_met":16} -->
+<!-- SPEC_META: {"date":"2026-04-04","title":"qpeek - Quick Peek File Viewer","criteria_total":22,"criteria_met":19} -->

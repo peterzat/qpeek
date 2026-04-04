@@ -19,7 +19,7 @@ pip install -e .
 
 ```bash
 . .venv/bin/activate
-qpeek [OPTIONS] FILE [FILE ...]
+qpeek [OPTIONS] FILE|DIR [FILE ...]
 ```
 
 Or without activating: `.venv/bin/qpeek`
@@ -27,7 +27,7 @@ Or without activating: `.venv/bin/qpeek`
 ## Project layout
 
 - `qpeek/cli.py` -- argument parsing, file type detection, validation
-- `qpeek/server.py` -- HTTP server, request routing, shutdown lifecycle
+- `qpeek/server.py` -- HTTP server, request routing, shutdown lifecycle, serve mode (static file server)
 - `qpeek/html_gen.py` -- HTML/CSS/JS page generation for all modes
 - `qpeek/markdown.py` -- stdlib-only markdown to HTML renderer
 - `tests/` -- unit tests (cli, markdown) and integration tests (server)
